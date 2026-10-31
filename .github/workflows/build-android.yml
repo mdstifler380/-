@@ -1,0 +1,61 @@
+name: SpotPulseAI CI Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: Build & Package APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'zulu'
+
+      - name: Unzip Uploaded Project
+        run: |
+          ZIP_FILE=$(find . -name "*.zip" | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No .zip file found! Make sure you uploaded the project zip."
+            exit 1
+          fi
+          echo "Found zip file: $ZIP_FILE. Unzipping..."
+          unzip -q "$ZIP_FILE" -d extracted_project/
+          
+          PROJECT_DIR=$(dirname $(find extracted_project/ -name "settings.gradle.kts" | head -n 1))
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: settings.gradle.kts not found inside the zip file!"
+            exit 1
+          fi
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Generate Wrapper & Build Debug APK
+        run: |
+          cd "${{ env.PROJECT_DIR }}"
+          # Inject memory limits specifically for the GitHub VM
+          echo "org.gradle.jvmargs=-Xmx4G -Dkotlin.daemon.jvm.options=\"-Xmx2G\"" >> gradle.properties
+          
+          gradle wrapper --gradle-version 8.7
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotPulseAI-Debug-APK
+          path: '**/${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk'
+          retention-days: 7
